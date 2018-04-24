@@ -1,12 +1,3 @@
-// --------------------------------------------------------------------------------------------------------------------
-// <copyright file="File.cs" company="Sitecore">
-//   Copyright (c) Sitecore. All rights reserved.
-// </copyright>
-// <summary>
-//   Represents a File field.
-// </summary>
-// --------------------------------------------------------------------------------------------------------------------
-
 namespace Sitecore.Support.Shell.Applications.ContentEditor
 {
   using System;
@@ -20,13 +11,15 @@ namespace Sitecore.Support.Shell.Applications.ContentEditor
   using Sitecore.Diagnostics;
   using Sitecore.Shell.Applications.Dialogs.MediaBrowser;
   using Sitecore.Shell.Applications.ContentEditor;
+  using Sitecore.Web;
+  using System.Collections.Specialized;
+  using Sitecore.Globalization;
 
   /// <summary>
   /// Represents a File field.
   /// </summary>
   public class File : Edit, IContentField
   {
-    // <file url="/upload/1.jpg" title="" mediaid="{78E5BAF6-3EAD-43C5-9E95-81A3186991A1}" />
 
     #region Constructor
 
@@ -127,7 +120,26 @@ namespace Sitecore.Support.Shell.Applications.ContentEditor
         switch (message.Name)
         {
           case "contentfile:open":
-            Sitecore.Context.ClientPage.Start(this, "OpenFile");
+
+            #region Sitecore.Support.218634
+            var contentLanguage = WebUtil.GetFormValue("scLanguage");
+
+            if (string.IsNullOrWhiteSpace(contentLanguage))
+            {
+              Sitecore.Context.ClientPage.Start(this, "OpenFile");
+            }
+            else
+            {
+              var parameters = new NameValueCollection();
+
+              parameters.Add("scSupportItemContentLanguage", contentLanguage);
+
+              ClientPipelineArgs args = new ClientPipelineArgs(parameters);
+
+              Sitecore.Context.ClientPage.Start(this, "OpenFile", args);
+            }
+            // Sitecore.Context.ClientPage.Start(this, "OpenFile");
+            #endregion
             break;
 
           case "contentfile:download":
@@ -281,8 +293,14 @@ namespace Sitecore.Support.Shell.Applications.ContentEditor
       {
         string source = StringUtil.GetString(this.Source, Constants.MediaLibraryPath);
 
-        Dialogs.BrowseImage(this.XmlValue.GetAttribute("mediaid"), source, true);
+        #region Sitecore.Support.218634
+        //Dialogs.BrowseImage(this.XmlValue.GetAttribute("mediaid"), source, true);
 
+        var itemContentLanguage = args.Parameters.Get("scSupportItemContentLanguage");
+
+        BrowseImage(this.XmlValue.GetAttribute("mediaid"), source, true, itemContentLanguage);
+
+        #endregion
         args.WaitForPostBack();
       }
     }
@@ -326,7 +344,7 @@ namespace Sitecore.Support.Shell.Applications.ContentEditor
 
     #endregion
 
-    private static void BrowseImage([NotNull] string id, [NotNull] string root, bool ignoreSpeak)
+    private static void BrowseImage([NotNull] string id, [NotNull] string root, bool ignoreSpeak, string itemContentLanguage = null)
     {
       Assert.ArgumentNotNull(id, "id");
       Assert.ArgumentNotNull(root, "root");
@@ -339,12 +357,37 @@ namespace Sitecore.Support.Shell.Applications.ContentEditor
       }
 
       options.IgnoreSpeak = ignoreSpeak;
-      options.Root = Client.ContentDatabase.GetItem(root);
 
+      #region Sitecore.Support.218634
+      //options.Root = Client.ContentDatabase.GetItem(root);
+
+      var language = !string.IsNullOrWhiteSpace(itemContentLanguage) ? Language.Parse(itemContentLanguage, Sitecore.Configuration.Settings.DefaultLanguage) : null;
+
+      if (language != null)
+      {
+        options.Root = Client.ContentDatabase.GetItem(root, language);
+      }
+      else
+      {
+        Sitecore.Diagnostics.Log.Warn("Sitecore.Support.218634 Item content language has not been resolved. Default language is used.", "File field");
+
+        options.Root = Client.ContentDatabase.GetItem(root);
+      }
+     
       if (!string.IsNullOrEmpty(id))
       {
-        options.SelectedItem = Client.ContentDatabase.GetItem(id);
+        //options.SelectedItem = Client.ContentDatabase.GetItem(id);
+        Item selectedItem = null;
+
+        if (language != null)
+        { selectedItem = Client.ContentDatabase.GetItem(id, language); }
+        else
+        { selectedItem = Client.ContentDatabase.GetItem(id); }
+
+        if (selectedItem != null)
+        { options.SelectedItem = selectedItem; }
       }
+      #endregion
 
       SheerResponse.ShowModalDialog(options.ToUrlString().ToString(), "1200px", "700px", string.Empty, true);
     }
